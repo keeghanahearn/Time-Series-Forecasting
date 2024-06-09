@@ -1,0 +1,463 @@
+---
+title: "THE Forecasting Project"
+author: "Keeghan Ahearn"
+date: "12/10/2023"
+output: html_document
+---
+Each question is worth 10 points unless specified otherwise.
+
+## 1. The Data
+
+a. Please provide a precise explanation of the data and variables used, such as length, links to sources, etc. 
+
+Y: Toyota Camry Sales
+
+The Y variable is the the US sales of Toyota Camrys. The data used is total monthly US sales figures for Toyota Camry's from January 2005 to December 2023.
+
+https://carfigures.com/us-market-brand/toyota/camry
+
+X1: Electric Vehicle sales
+
+The first independent variable is the US sales of electric vehicles. The data used is total monthly US sales for electric vehicles from December 2010 to October 2023. The electric vehicles are categorized as "PEV - Plug-in Electric Vehicles", which include both Battery Electric Vehicles and Plug-in Hybrid Electric Vehicles.
+
+https://www.anl.gov/esia/reference/light-duty-electric-drive-vehicles-monthly-sales-updates-historical-data
+
+X2: Commuter Bus Ridership
+
+The second independent variables is the total commuter bus ridership in the US. The data used is total monthly commuter bus ridership figures from different regions and transportation systems across the US. Ridership figures started being reported in January 2012, so the data used is January 2012 to September 2023.
+
+
+https://www.transit.dot.gov/ntd/data-product/monthly-module-raw-data-release
+
+
+b. Please explain why you choose series Y to forecast. Why is it important to forecast such a variable? 
+
+I chose series Y because the Toyota Camry is one of the most popular commuter vehicles in the US. I wanted to forecast the trend of the Toyota Camry sales because it's important to understand commuter decisions trends in the future for car manufacturers, policy makers, and the state or county level transportation departments.
+
+
+c. Please explain why you choose series X1 and X2 to help explain Y. Is the choice based on common sense or economic theory? Please elaborate.
+
+I chose series X1, electric vehicle sales, because electric vehicles are growing in popularity, especially with commuters. This decision is based on common sense, because the sales of electric vehicles and a gas powered Toyota Camry should have an inverse relationship, and I want to see if this is true in the forecast. The economic theory would be based on the gas cost of owning and driving a Toyota Camry. I chose series X2, Commuter bus ridership, because I wanted to explore the trend of commuter public transportation use. This can be used to explain Toyota Camry sales, a popular commuter vehicle, because they involve the same group of people: commuters. Like electric vehicles, I expect Toyota Camry sales and commuter bus ridership to have an inverse relationship.
+
+
+## 2. Initial Analysis
+
+a. Store all series in a CSV file, load the file, and convert it to a tsibble object. (Note you may also load multiple CSV files, and then merge all data series into one tsibble.)
+```{r}
+# Please type your code below
+library(tidyverse)
+library(tsibble)
+library(fpp3)
+library(ggplot2)
+library(tidyr)
+
+mydata <- read.csv('real data.csv', header = TRUE, sep = ',')
+
+totalcamrysales <- read.csv('long_join_data.csv', header = TRUE, sep = ',')
+
+pevsales <- read.csv('Total PEV Sales.csv', header = TRUE, sep = ',')
+
+pevsales_join <- pevsales %>%
+  filter(!row_number() %in% c(1:13, 155))
+
+merged_data <- merge(mydata, pevsales_join, by='Date')
+all_merged <- merge(merged_data, totalcamrysales, by = 'Date')
+
+all_merged$Date<-as.factor(all_merged$Date)
+abis<-strptime(all_merged$Date,format="%m/%d/%Y")
+all_merged$Date<-as.Date(abis,format="%Y-%m-%d")
+
+mytimeseries <- all_merged %>%
+  mutate(Month = yearmonth(Date)) %>%
+  as_tsibble(index = Date)
+
+mytimeseries <- mytimeseries %>%
+  mutate(Month = yearmonth(Month)) %>%
+  as_tsibble(index = Month)
+
+```
+
+b. Create time plots for each series (Y, X1, and X2).
+```{r}
+# Please type your code below
+
+autoplot(mytimeseries, PEV.Sales)
+autoplot(mytimeseries, sales)
+autoplot(mytimeseries, Sum.of.Commuter.Bus.Ridership)
+
+
+```
+
+c. Examine the general properties of the series: Are they smooth or jagged; is there a monthly or annual swing in the series; and does the series contain a trend in mean?
+
+The electric vehicle series is a jagged series that is trending upward, and has been exponentially trending upward since early 2020. 
+
+The commuter bus ridership is also a jagged series, that seems cyclic. The series was slightly trending downwards until the pandemic in 2020, where ridership dropped sharply, and has been slightly trending upwards since, although it is still significantly below the level it was at before the pandemic.
+
+The Toyota Camry sales series is a jagged series, and is trending downwards. The data is cyclic.
+
+None of the series contain a trend in mean.
+
+d. Do you think it’s necessary to take natural logarithm of each series? Why and why not? Please plot the transformed series if necessary.
+```{r}
+# Please type your code below
+
+lambda <- mytimeseries %>%
+  features(sales, features = guerrero) %>%
+  pull(lambda_guerrero)
+
+mytimeseries %>%
+  autoplot(box_cox(sales, lambda))
+
+PEV.Sales_lambda <- mytimeseries %>%
+  features(PEV.Sales, features = guerrero) %>%
+  pull(lambda_guerrero)
+
+mytimeseries %>%
+  autoplot(box_cox(PEV.Sales, PEV.Sales_lambda))
+
+Ridership_lambda <- mytimeseries %>%
+  features(Sum.of.Commuter.Bus.Ridership, features = guerrero) %>%
+  pull(lambda_guerrero)
+
+mytimeseries %>%
+  autoplot(box_cox(Sum.of.Commuter.Bus.Ridership, Ridership_lambda))
+
+```
+
+e. Decompose the Y series using the STL method with default settings, and visualize the resulting components by creating a single combined figure using `autoplot()`.
+```{r}
+# Please type your code below
+
+data_dcmp <- mytimeseries %>%
+  model(stl = STL(sales))
+
+components(data_dcmp) %>%
+  autoplot()
+
+```
+
+f. Split the data series Y into two parts, training and test data, where the training data is used to estimate any parameters of a forecasting method and the test data is used to evaluate its accuracy. The size of the test set is typically about 20% of the total sample. 
+```{r}
+# Please type your code below
+
+sales_train <- mytimeseries %>%
+  filter_index('2012 Jan' ~ '2021 Apr') %>%
+  select(sales)
+sales_test <- mytimeseries %>%
+  filter_index('2021 May' ~ .) %>%
+  select(sales)
+
+```
+
+g. Trim series X1 and X2 to match the length of the training set in series Y. And use the trimmed series for the subsequent analysis.
+```{r}
+# Please type your code below
+
+Ridership_train <- mytimeseries %>%
+  filter_index('2012 Jan' ~ '2021 Apr') %>%
+  select(Sum.of.Commuter.Bus.Ridership)
+
+PEV_train <- mytimeseries %>%
+  filter_index('2012 Jan' ~ '2021 Apr') %>%
+  select(PEV.Sales)
+
+```
+
+## 3. The Various Forecasts
+
+
+
+### 3.1 Simple Forecasting Method
+
+a. Try using various benchmark methods to forecast the test set of series Y and plot the forecasts along with training and test sets.
+```{r}
+# Please type your code below
+
+sales_fit <- sales_train %>%
+  model(
+    Mean = MEAN(sales),
+    Naive = NAIVE(sales),
+    `Seasonal naive` = SNAIVE(sales),
+    Drift = RW(sales ~ drift())
+  )
+  
+sales_fc <- sales_fit %>% forecast(h = 29)
+
+sales_fc %>%
+  autoplot(sales_train, level = NULL) +
+  autolayer((sales_test),
+            colour = "brown") +
+  labs(y = "Units Sold", title = "Forecasts for Toyota Camry") +
+  guides(colour = guide_legend(title = "Forecast"))
+
+```
+
+b. Based on the forecast plots, which method did best in your opinion?
+
+The seasonal naive method fit the test data the best compared to the other methods. It did not match the test data perfectly, but followed the general direction of the test data trends.
+
+c. Check the residuals of your preferred method using `gg_tsresiduals()`. Do the residuals appear to be uncorrelated and normally distributed?
+```{r}
+# Please type your code below
+
+sales_train %>% 
+  model(`Seasonal naive` = SNAIVE(sales)) %>%
+  gg_tsresiduals()
+
+```
+
+d. Use `accuracy()` to compute the forecast accuracy.
+```{r}
+# Please type your code below
+
+accuracy(sales_fc, mytimeseries)
+
+```
+
+
+
+
+### 3.2 Linear Models
+
+Suppose we expect series Y to depend on series X1 and X2.
+
+a. Generate a scatterplot matrix of three variables: Y, X1, and X2.
+```{r}
+# Please type your code below
+
+mytimeseries %>%
+  GGally::ggpairs(columns = 2:4)
+
+```
+
+
+b. Fit a linear regression with X1 and X2 to the training data, and report the results. Please note that X1 and X2 should be the trimmed series, align in length with the training set in Y.
+```{r}
+# Please type your code below
+
+sales_regression <- sales_train %>%
+  model(TSLM((sales) ~ (Ridership_train$Sum.of.Commuter.Bus.Ridership) + (PEV_train$PEV.Sales)))
+
+report(sales_regression)
+
+mytimeseries %>%
+  ggplot(aes(x = (PEV.Sales), y = (sales))) +
+  labs(y = 'sales',
+       x = 'Plug-In Electric Vehicle Sales') +
+  geom_point() +
+  geom_smooth(method = 'lm', se = FALSE)
+
+```
+
+c. Fit a linear regression with only trend and seasonal dummies to the training data, and report the results.
+```{r}
+# Please type your code below
+
+fit_sales_regression <- sales_train %>%
+  model(TSLM(sales ~ trend() + season()))
+
+report(fit_sales_regression)
+
+```
+
+d. Check the residuals from part c) using `gg_tsresiduals()` and comment on the residuals.
+```{r}
+# Please type your code below
+fit_sales_regression %>%
+  gg_tsresiduals()
+
+#The residual plots shows that the residuals are centered around 0, so this would suggest that they are homoscedastic. However the ACF plot does show some expenonential trends in the beginning of the plot.
+
+```
+
+e. Plot the residuals against the fitted values from part c), and comment on the residuals.
+```{r}
+# Please type your code below
+augment(sales_regression) %>%
+  ggplot(aes(x = .fitted, y = .resid)) +
+  geom_point() + labs(x = "Fitted", y = "Residuals")
+  
+#The residuals do not seem evenly or randomly scattered, because they are concentrated on the right side. This would suggest heteroscedasticity.
+
+```
+
+f. Compute forecasts for the entire test set using the linear regression model with only trend and seasonal dummies from part c).
+```{r}
+# Please type your code below
+
+fit_sales_regression %>%
+  forecast() %>%
+  autoplot(mytimeseries)
+
+
+```
+
+g. Create a plot that includes the forecasts from part f) along with the training and test sets.
+```{r}
+# Please type your code below
+
+sales_fc %>%
+  autoplot(sales_train, level = NULL) +
+  autolayer((sales_test),
+            colour = "brown") +
+  labs(y = "Units Sold", title = "Forecasts for Toyota Camry") +
+  guides(colour = guide_legend(title = "Forecast"))
+
+```
+
+h. Use `accuracy()` to compute the forecast accuracy.
+
+```{r}
+# Please type your code below
+
+accuracy(sales_fc, mytimeseries)
+
+```
+
+### 3.3 Exponential Smoothing
+
+
+a. Use `ETS()` to select an appropriate model for the training set in series Y.
+```{r}
+# Please type your code below
+
+sales_ETS_fit <- sales_train %>%
+  model(ETS(sales))
+
+tidy(sales_ETS_fit)
+report(sales_ETS_fit)
+
+```
+
+b. Run residual diagnostics and comment on the residuals.
+
+```{r}
+# Please type your code below
+
+sales_ETS_fit %>%
+  gg_tsresiduals()
+
+```
+
+c. Compute forecasts for the entire test set, and plot the forecasts along with the test and training sets.
+```{r}
+# Please type your code below
+
+sales_ETS_fc <- sales_ETS_fit %>% forecast(h=29)
+
+
+sales_ETS_fc %>%
+  autoplot(sales_train, level = NULL) +
+  autolayer((sales_test),
+            colour = "brown") +
+  labs(y = "Units Sold", title = "Forecasts for Toyota Camry") +
+  guides(colour = guide_legend(title = "Forecast"))
+
+
+```
+
+d. Use `accuracy()` to measure forecast accuracy.
+```{r}
+# Please type your code below
+
+accuracy(sales_ETS_fc, mytimeseries)
+
+```
+
+### 3.4 ARIMA Models
+
+a. Is the training set in series Y stationary? Explain why. 
+
+No, there is a trend downwards. In order for the training set to be stationary, there should be no patterns like seasonality or trend in the data, and the series should be horizontal.
+
+b. If necessary, use differencing to obtain stationary data of the training set. Based on the ACF and PACF plots of the differenced data, suggest two plausible seasonal ARIMA models.
+```{r}
+# Please type your code below
+sales_train %>%
+  gg_tsdisplay(log(sales) %>%
+                 difference(1), plot_type = 'partial')
+
+
+```
+
+c. Use `ARIMA()` to automatically find an appropriate seasonal ARIMA model for the training set.
+```{r}
+# Please type your code below
+library(urca)
+sales_Arima <- mytimeseries %>%
+  model(
+    stepwise = ARIMA(sales))
+
+report(sales_Arima)
+```
+
+
+d. Fit all three seasonal ARIMA models to the training set. What model was the best in terms of AICc? 
+```{r}
+# Please type your code below
+
+
+sales_seasonal_fit <- sales_train %>%
+  model(
+    arima1010010 = ARIMA(sales ~ pdq(10,1,0) + PDQ(1,1,0)),
+    arima0114011 = ARIMA(sales ~ pdq(0,1,14) + PDQ(0,1,1)),
+    auto = ARIMA(sales, stepwise = FALSE, approx = FALSE)
+  )
+
+report(sales_seasonal_fit)
+
+#The best model is the auto, with an AICc of 2173 because the other models are null.
+
+```
+
+e. Run residual diagnostics for the chosen model, and comment on the residuals.
+```{r}
+# Please type your code below
+
+sales_seasonal_fit %>% select(auto) %>% gg_tsresiduals(lag=12)
+
+#The residuals appear to be white noise on the ACF plot and are centered around 0 on the histogram. The residuals are homoscedastic.
+
+```
+
+f. Compute forecasts from the chosen model for the entire test set, and plot the forecasts along with the test and training sets.
+```{r}
+# Please type your code below
+
+forecast(sales_seasonal_fit, h = 29) %>%
+  filter(.model == 'auto') %>% 
+           autoplot(sales_train) +
+  autolayer((sales_test),
+            colour = 'brown') +
+  labs(y = "Units Sold", title = "Forecasts for Toyota Camry") +
+  guides(colour = guide_legend(title = "Forecast"))
+
+```
+
+g. Use `accuracy()` to measure forecast accuracy.
+```{r}
+# Please type your code below
+
+sales_seasonal_fc <- sales_seasonal_fit %>% forecast(h=29)
+
+
+accuracy(sales_seasonal_fc, mytimeseries)
+
+```
+
+
+## 4 Model Comparison
+
+a. Considering the Root Mean Squared Error (RMSE), which model demonstrates the most accurate forecast performance? Why?
+
+The "auto" model demonstrates the most accurate forecast performance. My other suggested Amira models do not work with the ARIMA parameters I set, so the auto model is the best.
+
+```{r}
+sessionInfo()
+```
+
+## Please click the **Knit** button, select **Knit to HTML**. An HTML document should appear. Save this HTML file in the same directory as the R Markdown file, and then upload it to Canvas.
+
+## Congrats, you're done!
+
